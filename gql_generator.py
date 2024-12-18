@@ -1,5 +1,7 @@
 """Generate GraphQL queries, mutations, and fragments from a schema.
 
+by. MK KIM
+
 Example::
     import django
     os.environ['DJANGO_SETTINGS_MODULE'] = 'project.debug'
@@ -30,6 +32,11 @@ fragment ${fragment} on ${type} {
     ${fields}
 }
 """)
+QUERY_TEMPLATE = string.Template("""
+query ${operation_name}(${variables}) {
+    ${query_name}(${arguments})
+}
+""")
 QUERY_TEMPLATE_SINGLE = string.Template("""
 query ${operation_name}(${variables}) {
     ${query_name}(${arguments}) {
@@ -37,7 +44,7 @@ query ${operation_name}(${variables}) {
     }
 }
 """)
-QUERY_TEMPLATE = string.Template("""
+QUERY_TEMPLATE_PAGINATION = string.Template("""
 query ${operation_name}(
     ${variables}
 ) {
@@ -81,8 +88,6 @@ class GQLGenerator:
     fragment_name_replace = ('Type.*', 'Field')
     fragment_template = FRAGMENT_TEMPLATE
     query_exclude = ['_debug']
-    query_template_single = QUERY_TEMPLATE_SINGLE
-    query_template = QUERY_TEMPLATE
     mutation_exclude = ['_debug']
     mutation_template = MUTATION_TEMPLATE
 
@@ -151,14 +156,22 @@ class GQLGenerator:
                 field_type = field.type
             else:
                 field_type = field.type.of_type
-            if self.fragment_name_replace:
-                fragment = re.sub(*self.fragment_name_replace, string=field_type.name)
+
+            if isinstance(field_type, GraphQLNonNull):
+                fragment = None
+                template = QUERY_TEMPLATE
             else:
-                fragment = field_type.name
-            if 'page' in field.args:
-                template = self.query_template
-            else:
-                template = self.query_template_single
+                fragment = (
+                    re.sub(*self.fragment_name_replace, string=field_type.name)
+                    if self.fragment_name_replace
+                    else field_type.name
+                )
+                template = (
+                    QUERY_TEMPLATE_PAGINATION
+                    if 'page' in field.args
+                    else QUERY_TEMPLATE_SINGLE
+                )
+
             variables = []
             arguments = []
             for arg_name, arg_type in self._arguments_to_name_and_scalar_type(
@@ -166,6 +179,7 @@ class GQLGenerator:
             ):
                 variables.append(f'${arg_name}: {arg_type}')
                 arguments.append(f'{arg_name}: ${arg_name}')
+
             yield template.substitute(
                 operation_name=name,
                 variables='\n'.join(variables),
